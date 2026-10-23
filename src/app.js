@@ -1,19 +1,19 @@
-import { pixelate, toSVG } from './pixelate.js';
+import { pixelate, toSVG, SIZE } from './pixelate.js?v=2';
 const $ = s => document.querySelector(s);
 const original = $('#original'), result = $('#result');
 const source = original.getContext('2d', { willReadFrequently: true });
 const output = result.getContext('2d');
-let step = 5, cells = [], filename = 'flower', revision = 0, loading = false;
-const demo = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><path d="M49 54h6v40h-6z" fill="#366a48"/><path d="M52 78C31 79 25 67 27 59c17-1 27 8 25 19" fill="#5c9561"/><path d="M53 86c17-1 24-12 21-21-14 0-23 8-21 21" fill="#83aa65"/><path d="M50 16C33-8 17 12 24 27 0 23-4 49 19 54 5 74 27 91 42 73c7 25 33 17 32-4 25 7 36-19 14-30 16-18-5-38-22-25-3-18-14-18-16 2" fill="#f17663"/><circle cx="50" cy="45" r="14" fill="#f8cd61"/></svg>';
+let step = 5, cells = [], filename = 'ring', revision = 0, loading = false;
+const demo = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><path fill="#000" fill-rule="evenodd" d="M100 10 180 55v95l-80 40-80-40V55Zm0 50c-22 0-40 18-40 40s18 40 40 40 40-18 40-40-18-40-40-40Z"/></svg>';
 function feedback(message, error = false) { $('#feedback').textContent = message; $('#feedback').classList.toggle('error', error); }
 function render() {
-  cells = pixelate(source.getImageData(0, 0, 100, 100).data, 100, 100, step);
-  output.clearRect(0, 0, 100, 100);
-  for (const c of cells) { output.fillStyle = `rgba(${c.r},${c.g},${c.b},${c.a / 255})`; output.fillRect(c.x, c.y, c.w, c.h); }
+  cells = pixelate(source.getImageData(0, 0, SIZE, SIZE).data, SIZE, SIZE, step);
+  output.clearRect(0, 0, SIZE, SIZE);
+  for (const c of cells) { output.fillStyle = `rgb(${c.r},${c.g},${c.b})`; output.fillRect(c.x, c.y, c.w, c.h); }
   $('#step-tag').textContent = `Шаг ${step} px`;
-  $('#cell-count').textContent = `${100 / step} × ${100 / step} клеток`;
-  $('#step-hint').textContent = step === 5 ? 'Больше деталей, мягче силуэт' : 'Крупнее пиксель, смелее силуэт';
-  $('#result-stage').style.setProperty('--grid-size', `${step}%`);
+  $('#cell-count').textContent = `${SIZE / step} × ${SIZE / step} клеток`;
+  $('#step-hint').textContent = step === 5 ? 'Больше деталей, чёткие края' : 'Крупнее пиксель, смелее силуэт';
+  $('#result-stage').style.setProperty('--grid-size', `${step / SIZE * 100}%`);
 }
 function imageFromBlob(blob) {
   return new Promise((resolve, reject) => {
@@ -36,13 +36,16 @@ function safeSVG(text) {
   }
   const svg = doc.documentElement;
   const viewBox = svg.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
-  for (const name of ['width', 'height']) {
-    if (!svg.hasAttribute(name)) {
-      if (viewBox?.length !== 4 || viewBox[2] !== 100 || viewBox[3] !== 100) throw new Error('Нужна иконка размером 100 × 100 px.');
-      svg.setAttribute(name, '100');
-    } else if (!/^100(?:\.0+)?(?:px)?$/.test(svg.getAttribute(name).trim())) throw new Error('Нужна иконка размером 100 × 100 px.');
-  }
-  return new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' });
+  const dimensions = ['width', 'height'].map((name, axis) => {
+    if (!svg.hasAttribute(name)) return viewBox?.length === 4 ? viewBox[axis + 2] : NaN;
+    const match = /^(100|200)(?:\.0+)?(?:px)?$/.exec(svg.getAttribute(name).trim());
+    return match ? Number(match[1]) : NaN;
+  });
+  if (![100, SIZE].includes(dimensions[0]) || dimensions[0] !== dimensions[1]) throw new Error('Нужна квадратная иконка 100 × 100 или 200 × 200 px.');
+  if (!svg.hasAttribute('viewBox')) svg.setAttribute('viewBox', `0 0 ${dimensions[0]} ${dimensions[1]}`);
+  svg.setAttribute('width', String(SIZE));
+  svg.setAttribute('height', String(SIZE));
+  return { blob: new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' }), size: dimensions[0] };
 }
 function externalURL(value) {
   return [...value.matchAll(/url\(([^)]*)\)/gi)].some(match => !match[1].trim().replace(/^['"]|['"]$/g, '').startsWith('#'));
@@ -57,15 +60,20 @@ async function upload(file) {
     const svg = /\.svg$/i.test(file.name) || file.type === 'image/svg+xml';
     if (!svg && !/\.png$/i.test(file.name) && file.type !== 'image/png') throw new Error('Выберите SVG или PNG. Другие форматы не поддерживаются.');
     feedback('Открываем иконку…');
-    const blob = svg ? safeSVG(await file.text()) : file;
+    const vector = svg ? safeSVG(await file.text()) : null;
+    const blob = vector ? vector.blob : file;
     if (!svg) {
       const signature = new Uint8Array(await file.slice(0, 8).arrayBuffer());
       if (signature.join(',') !== '137,80,78,71,13,10,26,10') throw new Error('Этот файл не является PNG. Проверьте формат.');
     }
     const image = await imageFromBlob(blob);
     if (ticket !== revision) return;
-    if (image.naturalWidth !== 100 || image.naturalHeight !== 100) throw new Error(`Размер иконки — ${image.naturalWidth} × ${image.naturalHeight} px. Нужен 100 × 100 px.`);
-    source.clearRect(0, 0, 100, 100); source.drawImage(image, 0, 0);
+    if (![100, SIZE].includes(image.naturalWidth) || image.naturalWidth !== image.naturalHeight) throw new Error(`Размер иконки — ${image.naturalWidth} × ${image.naturalHeight} px. Нужен 100 × 100 или 200 × 200 px.`);
+    source.clearRect(0, 0, SIZE, SIZE);
+    source.imageSmoothingEnabled = false;
+    source.drawImage(image, 0, 0, SIZE, SIZE);
+    const sourceSize = vector ? vector.size : image.naturalWidth;
+    $('#source-dimensions').textContent = `${sourceSize} × ${sourceSize} px`;
     filename = file.name.replace(/\.(svg|png)$/i, '') || 'icon';
     $('#source-name').textContent = file.name; $('#source-tag').textContent = svg ? 'SVG' : 'PNG';
     render(); feedback('Готово! Выберите шаг и скачайте иконку.');
