@@ -1,19 +1,19 @@
-import { pixelate, toSVG, SIZE } from './pixelate.js?v=2';
+import { pixelate, toSVG, SIZE } from './pixelate.js?v=3';
 const $ = s => document.querySelector(s);
 const original = $('#original'), result = $('#result');
 const source = original.getContext('2d', { willReadFrequently: true });
 const output = result.getContext('2d');
 let step = 5, cells = [], filename = 'ring', revision = 0, loading = false;
 const demo = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><path fill="#000" fill-rule="evenodd" d="M100 10 180 55v95l-80 40-80-40V55Zm0 50c-22 0-40 18-40 40s18 40 40 40 40-18 40-40-18-40-40-40Z"/></svg>';
-function feedback(message, error = false) { $('#feedback').textContent = message; $('#feedback').classList.toggle('error', error); }
+function feedback(message, error = false) {
+  $('#feedback').textContent = error ? message : '';
+  $('#feedback').hidden = !error;
+}
 function render() {
   cells = pixelate(source.getImageData(0, 0, SIZE, SIZE).data, SIZE, SIZE, step);
   output.clearRect(0, 0, SIZE, SIZE);
   for (const c of cells) { output.fillStyle = `rgb(${c.r},${c.g},${c.b})`; output.fillRect(c.x, c.y, c.w, c.h); }
-  $('#step-tag').textContent = `Шаг ${step} px`;
-  $('#cell-count').textContent = `${SIZE / step} × ${SIZE / step} клеток`;
-  $('#step-hint').textContent = step === 5 ? 'Больше деталей, чёткие края' : 'Крупнее пиксель, смелее силуэт';
-  $('#result-stage').style.setProperty('--grid-size', `${step / SIZE * 100}%`);
+  result.dataset.step = String(step);
 }
 function imageFromBlob(blob) {
   return new Promise((resolve, reject) => {
@@ -54,7 +54,7 @@ async function upload(file) {
   const ticket = ++revision;
   if (!file) return;
   loading = true;
-  document.querySelectorAll('.export button').forEach(button => button.disabled = true);
+  document.querySelectorAll('.downloads button').forEach(button => button.disabled = true);
   try {
     if (file.size > 5 * 1024 * 1024) throw new Error('Файл слишком большой. Максимум — 5 МБ.');
     const svg = /\.svg$/i.test(file.name) || file.type === 'image/svg+xml';
@@ -73,13 +73,14 @@ async function upload(file) {
     source.imageSmoothingEnabled = false;
     source.drawImage(image, 0, 0, SIZE, SIZE);
     const sourceSize = vector ? vector.size : image.naturalWidth;
-    $('#source-dimensions').textContent = `${sourceSize} × ${sourceSize} px`;
+    original.setAttribute('aria-label', `Исходная иконка: ${file.name}, ${svg ? 'SVG' : 'PNG'}, ${sourceSize} × ${sourceSize} px`);
     filename = file.name.replace(/\.(svg|png)$/i, '') || 'icon';
-    $('#source-name').textContent = file.name; $('#source-tag').textContent = svg ? 'SVG' : 'PNG';
-    render(); feedback('Готово! Выберите шаг и скачайте иконку.');
+    render();
+    result.dataset.revision = String(ticket);
+    feedback('');
   } catch (error) { if (ticket === revision) feedback(error.message, true); }
   finally {
-    if (ticket === revision) { loading = false; document.querySelectorAll('.export button').forEach(button => button.disabled = false); }
+    if (ticket === revision) { loading = false; document.querySelectorAll('.downloads button').forEach(button => button.disabled = false); }
     $('#file-input').value = '';
   }
 }
@@ -90,7 +91,7 @@ function download(blob, extension) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 document.querySelectorAll('[name="step"]').forEach(input => input.addEventListener('change', () => { step = Number(input.value); render(); }));
-$('#show-grid').addEventListener('change', event => $('#result-stage').classList.toggle('show-grid', event.target.checked));
+$('#upload-button').addEventListener('click', () => $('#file-input').click());
 $('#file-input').addEventListener('change', event => upload(event.target.files[0]));
 const zone = $('#upload-zone');
 let dragDepth = 0;

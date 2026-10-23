@@ -1,16 +1,20 @@
 import { test, expect } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 const svg = body => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">${body}</svg>`);
-async function open(page) { await page.goto('/'); await expect(page.locator('#cell-count')).toHaveText('40 × 40 клеток'); }
+async function open(page) { await page.goto('/'); await expect(page.locator('#result')).toHaveAttribute('data-step', '5'); }
 async function upload(page, buffer, name = 'test.svg', mimeType = 'image/svg+xml') {
+  const previous = await page.locator('#result').getAttribute('data-revision');
   await page.locator('#file-input').setInputFiles({ name, mimeType, buffer });
-  await expect(page.locator('#feedback')).toHaveText('Готово! Выберите шаг и скачайте иконку.');
+  await expect(page.locator('#result')).not.toHaveAttribute('data-revision', previous || '');
+  await expect(page.locator('#original')).toHaveAttribute('aria-label', new RegExp(name.replace('.', '\\.')));
+  await expect(page.locator('#feedback')).toBeHidden();
+  await expect(page.locator('#download-png')).toBeEnabled();
 }
 async function download(page, selector) {
   const event = page.waitForEvent('download'); await page.locator(selector).click();
   const file = await event; return { name: file.suggestedFilename(), bytes: await readFile(await file.path()) };
 }
-test('SVG upload, both pixel sizes, vector export and grid-independent PNG with transparency', async ({ page }) => {
+test('SVG upload, both pixel sizes, vector export and PNG with transparency', async ({ page }) => {
   await open(page);
   await upload(page, svg('<rect x="40" y="40" width="120" height="120" fill="#ef4934"/>'));
   const five = await download(page, '#download-svg');
@@ -18,10 +22,9 @@ test('SVG upload, both pixel sizes, vector export and grid-independent PNG with 
   expect((five.bytes.toString().match(/<rect /g) || []).length).toBe(576);
   expect(five.bytes.toString()).not.toContain('<image');
   await page.getByRole('radio', { name: '10 px' }).check();
-  await expect(page.locator('#cell-count')).toHaveText('20 × 20 клеток');
+  await expect(page.locator('#result')).toHaveAttribute('data-step', '10');
   const ten = await download(page, '#download-svg');
   expect((ten.bytes.toString().match(/<rect /g) || []).length).toBe(144);
-  await page.getByRole('switch').check();
   const png = await download(page, '#download-png');
   expect(png.name).toBe('test-pixel-10px.png');
   const pixels = await page.evaluate(async data => {
@@ -40,7 +43,7 @@ test('PNG upload and rejection of wrong dimensions preserves the previous result
     return c.toDataURL().split(',')[1];
   });
   await upload(page, Buffer.from(png, 'base64'), 'blue.png', 'image/png');
-  await expect(page.locator('#source-tag')).toHaveText('PNG');
+  await expect(page.locator('#original')).toHaveAttribute('aria-label', /PNG/);
   const before = await page.locator('#result').evaluate(c => c.toDataURL());
   await page.locator('#file-input').setInputFiles({ name: 'wrong.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"/>') });
   await expect(page.locator('#feedback')).toContainText('200 × 200');
@@ -150,7 +153,7 @@ test('existing 100px SVG and PNG inputs scale to 200px without clipping', async 
     return [[...ctx.getImageData(50, 50, 1, 1).data], [...ctx.getImageData(150, 150, 1, 1).data]];
   });
   expect(coverage).toEqual([[0, 0, 0, 0], [255, 0, 0, 255]]);
-  await expect(page.locator('#source-dimensions')).toHaveText('100 × 100 px');
+  await expect(page.locator('#original')).toHaveAttribute('aria-label', /100 × 100 px/);
   const png = await page.evaluate(() => {
     const c = document.createElement('canvas'); c.width = c.height = 100;
     const ctx = c.getContext('2d'); ctx.fillStyle = 'red'; ctx.fillRect(50, 50, 50, 50);
