@@ -3,6 +3,8 @@ const $ = s => document.querySelector(s);
 const original = $('#original'), result = $('#result');
 const source = original.getContext('2d', { willReadFrequently: true });
 const output = result.getContext('2d');
+const INPUT_SIZES = [100, 200, 300, 400];
+const sizeError = 'Нужна квадратная иконка 100 × 100, 200 × 200, 300 × 300 или 400 × 400 px.';
 let step = 5, cells = [], filename = 'ring', revision = 0, loading = false;
 const demo = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><path fill="#000" fill-rule="evenodd" d="M100 10 180 55v95l-80 40-80-40V55Zm0 50c-22 0-40 18-40 40s18 40 40 40 40-18 40-40-18-40-40-40Z"/></svg>';
 function feedback(message, error = false) {
@@ -38,10 +40,10 @@ function safeSVG(text) {
   const viewBox = svg.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
   const dimensions = ['width', 'height'].map((name, axis) => {
     if (!svg.hasAttribute(name)) return viewBox?.length === 4 ? viewBox[axis + 2] : NaN;
-    const match = /^(100|200)(?:\.0+)?(?:px)?$/.exec(svg.getAttribute(name).trim());
+    const match = /^(\d+)(?:\.0+)?(?:px)?$/.exec(svg.getAttribute(name).trim());
     return match ? Number(match[1]) : NaN;
   });
-  if (![100, SIZE].includes(dimensions[0]) || dimensions[0] !== dimensions[1]) throw new Error('Нужна квадратная иконка 100 × 100 или 200 × 200 px.');
+  if (!INPUT_SIZES.includes(dimensions[0]) || dimensions[0] !== dimensions[1]) throw new Error(sizeError);
   if (!svg.hasAttribute('viewBox')) svg.setAttribute('viewBox', `0 0 ${dimensions[0]} ${dimensions[1]}`);
   svg.setAttribute('width', String(SIZE));
   svg.setAttribute('height', String(SIZE));
@@ -68,7 +70,7 @@ async function upload(file) {
     }
     const image = await imageFromBlob(blob);
     if (ticket !== revision) return;
-    if (![100, SIZE].includes(image.naturalWidth) || image.naturalWidth !== image.naturalHeight) throw new Error(`Размер иконки — ${image.naturalWidth} × ${image.naturalHeight} px. Нужен 100 × 100 или 200 × 200 px.`);
+    if (!INPUT_SIZES.includes(image.naturalWidth) || image.naturalWidth !== image.naturalHeight) throw new Error(`Размер иконки — ${image.naturalWidth} × ${image.naturalHeight} px. ${sizeError}`);
     source.clearRect(0, 0, SIZE, SIZE);
     source.imageSmoothingEnabled = false;
     source.drawImage(image, 0, 0, SIZE, SIZE);
