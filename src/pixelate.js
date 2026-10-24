@@ -1,5 +1,3 @@
-export const SIZE = 200;
-
 /** Hard-edged cells: binary coverage and a dominant source color, never a blend. */
 export function pixelate(data, width, height, step) {
   if (![5, 10].includes(step)) throw new Error('Unsupported pixel size');
@@ -26,7 +24,7 @@ export function pixelate(data, width, height, step) {
   }
   return cells;
 }
-export function toSVG(cells) {
+export function toSVG(cells, width, height) {
   const rects = cells.map(c => `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" fill="rgb(${c.r},${c.g},${c.b})"/>`).join('');
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}" shape-rendering="crispEdges">${rects}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" shape-rendering="crispEdges">${rects}</svg>`;
 }

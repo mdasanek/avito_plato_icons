@@ -1,4 +1,4 @@
-import { pixelate, toSVG, SIZE } from './pixelate.js?v=3';
+import { pixelate, toSVG } from './pixelate.js?v=5';
 const $ = s => document.querySelector(s);
 const original = $('#original'), result = $('#result');
 const source = original.getContext('2d', { willReadFrequently: true });
@@ -12,8 +12,9 @@ function feedback(message, error = false) {
   $('#feedback').hidden = !error;
 }
 function render() {
-  cells = pixelate(source.getImageData(0, 0, SIZE, SIZE).data, SIZE, SIZE, step);
-  output.clearRect(0, 0, SIZE, SIZE);
+  const { width, height } = original;
+  cells = pixelate(source.getImageData(0, 0, width, height).data, width, height, step);
+  output.clearRect(0, 0, width, height);
   for (const c of cells) { output.fillStyle = `rgb(${c.r},${c.g},${c.b})`; output.fillRect(c.x, c.y, c.w, c.h); }
   result.dataset.step = String(step);
 }
@@ -45,8 +46,8 @@ function safeSVG(text) {
   });
   if (!INPUT_SIZES.includes(dimensions[0]) || dimensions[0] !== dimensions[1]) throw new Error(sizeError);
   if (!svg.hasAttribute('viewBox')) svg.setAttribute('viewBox', `0 0 ${dimensions[0]} ${dimensions[1]}`);
-  svg.setAttribute('width', String(SIZE));
-  svg.setAttribute('height', String(SIZE));
+  svg.setAttribute('width', String(dimensions[0]));
+  svg.setAttribute('height', String(dimensions[1]));
   return { blob: new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' }), size: dimensions[0] };
 }
 function externalURL(value) {
@@ -71,10 +72,11 @@ async function upload(file) {
     const image = await imageFromBlob(blob);
     if (ticket !== revision) return;
     if (!INPUT_SIZES.includes(image.naturalWidth) || image.naturalWidth !== image.naturalHeight) throw new Error(`Размер иконки — ${image.naturalWidth} × ${image.naturalHeight} px. ${sizeError}`);
-    source.clearRect(0, 0, SIZE, SIZE);
-    source.imageSmoothingEnabled = false;
-    source.drawImage(image, 0, 0, SIZE, SIZE);
     const sourceSize = vector ? vector.size : image.naturalWidth;
+    original.width = original.height = sourceSize;
+    result.width = result.height = sourceSize;
+    source.imageSmoothingEnabled = false;
+    source.drawImage(image, 0, 0);
     original.setAttribute('aria-label', `Исходная иконка: ${file.name}, ${svg ? 'SVG' : 'PNG'}, ${sourceSize} × ${sourceSize} px`);
     filename = file.name.replace(/\.(svg|png)$/i, '') || 'icon';
     render();
@@ -104,6 +106,6 @@ zone.addEventListener('drop', event => { event.preventDefault(); dragDepth = 0; 
 window.addEventListener('dragover', event => event.preventDefault());
 window.addEventListener('drop', event => event.preventDefault());
 $('#download-png').addEventListener('click', () => { if (!loading) result.toBlob(blob => download(blob, 'png'), 'image/png'); });
-$('#download-svg').addEventListener('click', () => { if (!loading) download(new Blob([toSVG(cells)], { type: 'image/svg+xml' }), 'svg'); });
+$('#download-svg').addEventListener('click', () => { if (!loading) download(new Blob([toSVG(cells, result.width, result.height)], { type: 'image/svg+xml' }), 'svg'); });
 const image = await imageFromBlob(new Blob([demo], { type: 'image/svg+xml' }));
 if (revision === 0) { source.drawImage(image, 0, 0); render(); }
