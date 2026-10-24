@@ -45,7 +45,7 @@ test('PNG upload and rejection of wrong dimensions preserves the previous result
   await upload(page, Buffer.from(png, 'base64'), 'blue.png', 'image/png');
   await expect(page.locator('#original')).toHaveAttribute('aria-label', /PNG/);
   const before = await page.locator('#result').evaluate(c => c.toDataURL());
-  await page.locator('#file-input').setInputFiles({ name: 'wrong.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300"/>') });
+  await page.locator('#file-input').setInputFiles({ name: 'wrong.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="400"/>') });
   await expect(page.locator('#feedback')).toContainText('200 × 200');
   expect(await page.locator('#result').evaluate(c => c.toDataURL())).toBe(before);
 });
@@ -55,7 +55,7 @@ test('invalid and unsafe files are rejected; viewBox-only SVG works', async ({ p
   await expect(page.locator('#feedback')).toContainText('статичную');
   await page.locator('#file-input').setInputFiles({ name: 'fake.png', mimeType: 'image/png', buffer: Buffer.from('not a PNG') });
   await expect(page.locator('#feedback')).toContainText('не является PNG');
-  await upload(page, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><circle cx="100" cy="100" r="60" fill="green"/></svg>'));
+  await upload(page, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><circle cx="200" cy="200" r="120" fill="green"/></svg>'));
 });
 test('mobile layout, keyboard controls, and no external requests or browser errors', async ({ page }) => {
   const errors = [], external = [];
@@ -145,21 +145,29 @@ test('black and white source edges and neighboring colors never blend into new s
   const split = await page.locator('#result').evaluate(c => [...c.getContext('2d').getImageData(100, 50, 1, 1).data]);
   expect(split).toEqual([255, 0, 0, 255]);
 });
-test('existing 100px SVG and PNG inputs scale to 200px without clipping', async ({ page }) => {
-  await open(page);
-  await upload(page, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect x="50" y="50" width="50" height="50" fill="red"/></svg>'));
-  const coverage = await page.locator('#result').evaluate(c => {
-    const ctx = c.getContext('2d');
-    return [[...ctx.getImageData(50, 50, 1, 1).data], [...ctx.getImageData(150, 150, 1, 1).data]];
+for (const size of [100, 300, 400]) {
+  test(`${size}px SVG and PNG inputs scale to 200px without clipping`, async ({ page }) => {
+    await open(page);
+    await upload(page, Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect x="${size / 2}" y="${size / 2}" width="${size / 2}" height="${size / 2}" fill="red"/></svg>`));
+    const coverage = await page.locator('#result').evaluate(c => {
+      const ctx = c.getContext('2d');
+      return [[...ctx.getImageData(50, 50, 1, 1).data], [...ctx.getImageData(150, 150, 1, 1).data]];
+    });
+    expect(coverage).toEqual([[0, 0, 0, 0], [255, 0, 0, 255]]);
+    await expect(page.locator('#original')).toHaveAttribute('aria-label', new RegExp(`${size} × ${size} px`));
+    const vector = await download(page, '#download-svg');
+    expect(vector.bytes.toString()).toContain('width="200" height="200" viewBox="0 0 200 200"');
+    const png = await page.evaluate(size => {
+      const c = document.createElement('canvas'); c.width = c.height = size;
+      const ctx = c.getContext('2d'); ctx.fillStyle = 'red'; ctx.fillRect(size / 2, size / 2, size / 2, size / 2);
+      return c.toDataURL().split(',')[1];
+    }, size);
+    await upload(page, Buffer.from(png, 'base64'), 'scaled.png', 'image/png');
+    const result = await page.locator('#result').evaluate(c => [...c.getContext('2d').getImageData(150, 150, 1, 1).data]);
+    expect(result).toEqual([255, 0, 0, 255]);
+    const exported = await download(page, '#download-png');
+    // PNG IHDR stores the actual output dimensions, independently of the canvas preview.
+    expect(exported.bytes.readUInt32BE(16)).toBe(200);
+    expect(exported.bytes.readUInt32BE(20)).toBe(200);
   });
-  expect(coverage).toEqual([[0, 0, 0, 0], [255, 0, 0, 255]]);
-  await expect(page.locator('#original')).toHaveAttribute('aria-label', /100 × 100 px/);
-  const png = await page.evaluate(() => {
-    const c = document.createElement('canvas'); c.width = c.height = 100;
-    const ctx = c.getContext('2d'); ctx.fillStyle = 'red'; ctx.fillRect(50, 50, 50, 50);
-    return c.toDataURL().split(',')[1];
-  });
-  await upload(page, Buffer.from(png, 'base64'), 'small.png', 'image/png');
-  const result = await page.locator('#result').evaluate(c => [...c.getContext('2d').getImageData(150, 150, 1, 1).data]);
-  expect(result).toEqual([255, 0, 0, 255]);
-});
+}
