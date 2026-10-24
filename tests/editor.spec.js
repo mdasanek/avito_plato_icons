@@ -56,6 +56,8 @@ test('invalid and unsafe files are rejected; viewBox-only SVG works', async ({ p
   await page.locator('#file-input').setInputFiles({ name: 'fake.png', mimeType: 'image/png', buffer: Buffer.from('not a PNG') });
   await expect(page.locator('#feedback')).toContainText('не является PNG');
   await upload(page, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><circle cx="200" cy="200" r="120" fill="green"/></svg>'));
+  const exported = await download(page, '#download-svg');
+  expect(exported.bytes.toString()).toContain('width="400" height="400" viewBox="0 0 400 400"');
 });
 test('mobile layout, keyboard controls, and no external requests or browser errors', async ({ page }) => {
   const errors = [], external = [];
@@ -145,29 +147,37 @@ test('black and white source edges and neighboring colors never blend into new s
   const split = await page.locator('#result').evaluate(c => [...c.getContext('2d').getImageData(100, 50, 1, 1).data]);
   expect(split).toEqual([255, 0, 0, 255]);
 });
-for (const size of [100, 300, 400]) {
-  test(`${size}px SVG and PNG inputs scale to 200px without clipping`, async ({ page }) => {
+for (const size of [100, 200, 300, 400]) {
+  test(`${size}px SVG and PNG keep original export dimensions and 5px/10px cells`, async ({ page }) => {
     await open(page);
-    await upload(page, Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect x="${size / 2}" y="${size / 2}" width="${size / 2}" height="${size / 2}" fill="red"/></svg>`));
-    const coverage = await page.locator('#result').evaluate(c => {
-      const ctx = c.getContext('2d');
-      return [[...ctx.getImageData(50, 50, 1, 1).data], [...ctx.getImageData(150, 150, 1, 1).data]];
-    });
-    expect(coverage).toEqual([[0, 0, 0, 0], [255, 0, 0, 255]]);
-    await expect(page.locator('#original')).toHaveAttribute('aria-label', new RegExp(`${size} × ${size} px`));
-    const vector = await download(page, '#download-svg');
-    expect(vector.bytes.toString()).toContain('width="200" height="200" viewBox="0 0 200 200"');
+    const vector = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}"><rect x="${size / 2}" y="${size / 2}" width="${size / 2}" height="${size / 2}" fill="red"/></svg>`);
     const png = await page.evaluate(size => {
       const c = document.createElement('canvas'); c.width = c.height = size;
       const ctx = c.getContext('2d'); ctx.fillStyle = 'red'; ctx.fillRect(size / 2, size / 2, size / 2, size / 2);
       return c.toDataURL().split(',')[1];
     }, size);
-    await upload(page, Buffer.from(png, 'base64'), 'scaled.png', 'image/png');
-    const result = await page.locator('#result').evaluate(c => [...c.getContext('2d').getImageData(150, 150, 1, 1).data]);
-    expect(result).toEqual([255, 0, 0, 255]);
-    const exported = await download(page, '#download-png');
-    // PNG IHDR stores the actual output dimensions, independently of the canvas preview.
-    expect(exported.bytes.readUInt32BE(16)).toBe(200);
-    expect(exported.bytes.readUInt32BE(20)).toBe(200);
+    for (const [buffer, name, mimeType] of [[vector, 'native.svg', 'image/svg+xml'], [Buffer.from(png, 'base64'), 'native.png', 'image/png']]) {
+      await upload(page, buffer, name, mimeType);
+      await expect(page.locator('#original')).toHaveAttribute('aria-label', new RegExp(`${size} × ${size} px`));
+      for (const step of [5, 10]) {
+        await page.getByRole('radio', { name: `${step} px` }).check();
+        const coverage = await page.locator('#result').evaluate(c => {
+          const ctx = c.getContext('2d'), size = c.width;
+          return [[...ctx.getImageData(size / 4, size / 4, 1, 1).data], [...ctx.getImageData(size * 3 / 4, size * 3 / 4, 1, 1).data]];
+        });
+        expect(coverage).toEqual([[0, 0, 0, 0], [255, 0, 0, 255]]);
+        const svgFile = await download(page, '#download-svg');
+        const svgInfo = await page.evaluate(text => {
+          const root = new DOMParser().parseFromString(text, 'image/svg+xml').documentElement;
+          const rects = [...root.querySelectorAll('rect')];
+          return { width: root.getAttribute('width'), height: root.getAttribute('height'), viewBox: root.getAttribute('viewBox'), cells: rects.length, cellSizes: [...new Set(rects.map(r => `${r.getAttribute('width')}x${r.getAttribute('height')}`))] };
+        }, svgFile.bytes.toString());
+        expect(svgInfo).toEqual({ width: String(size), height: String(size), viewBox: `0 0 ${size} ${size}`, cells: (size / 2 / step) ** 2, cellSizes: [`${step}x${step}`] });
+        const pngFile = await download(page, '#download-png');
+        // Check the downloaded PNG's own dimensions, independently of the preview.
+        expect(pngFile.bytes.readUInt32BE(16)).toBe(size);
+        expect(pngFile.bytes.readUInt32BE(20)).toBe(size);
+      }
+    }
   });
 }
